@@ -1,8 +1,9 @@
 # citely
 
-Provider-agnostic RAG service that answers questions over a document corpus with
-**grounded, cited answers** — every claim traceable to a source chunk, and an
-explicit refusal when the corpus can't support an answer.
+**Retrieval-Augmented Generation (RAG) as a Service** — provider-agnostic, and
+built to answer questions over a document corpus with **grounded, cited
+answers**: every claim traceable to a source chunk, and an explicit refusal when
+the corpus can't support an answer.
 
 > Status: under construction. This README grows with the implementation.
 

@@ -1,7 +1,7 @@
 [project]
 name = "citely"
 version = "0.1.0"
-description = "Provider-agnostic RAG service with grounded, cited answers and explicit guardrails."
+description = "Retrieval-Augmented Generation as a Service, with grounded, cited answers and explicit guardrails."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
