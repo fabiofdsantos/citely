@@ -25,10 +25,10 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
             from citely.providers.anthropic import AnthropicChatProvider
 
             return AnthropicChatProvider(settings)
-        case "openai":
+        case "openai" | "ollama" as provider:
             from citely.providers.openai import OpenAIChatProvider
 
-            return OpenAIChatProvider(settings)
+            return OpenAIChatProvider(settings, provider=provider)
         case unknown:  # pragma: no cover - Literal typing makes this unreachable
             raise ConfigurationError(f"unknown LLM provider: {unknown!r}")
 
@@ -36,9 +36,9 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
 def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
     """Construct the embedding provider named by ``CITELY_EMBEDDING_PROVIDER``."""
     match settings.embedding_provider:
-        case "openai":
+        case "openai" | "ollama" as provider:
             from citely.providers.openai import OpenAIEmbeddingProvider
 
-            return OpenAIEmbeddingProvider(settings)
+            return OpenAIEmbeddingProvider(settings, provider=provider)
         case unknown:  # pragma: no cover - Literal typing makes this unreachable
             raise ConfigurationError(f"unknown embedding provider: {unknown!r}")

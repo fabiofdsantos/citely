@@ -16,20 +16,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from citely.errors import ConfigurationError
 
-LLMProviderName = Literal["openai", "anthropic"]
-EmbeddingProviderName = Literal["openai"]
+LLMProviderName = Literal["openai", "anthropic", "ollama"]
+EmbeddingProviderName = Literal["openai", "ollama"]
 VectorStoreName = Literal["chroma", "pgvector"]
 
 #: Chat models used when ``CITELY_LLM_MODEL`` is unset.
 DEFAULT_LLM_MODELS: Final[dict[LLMProviderName, str]] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-5",
+    "ollama": "llama3.1:8b",
 }
 
 #: Embedding models used when ``CITELY_EMBEDDING_MODEL`` is unset.
 DEFAULT_EMBEDDING_MODELS: Final[dict[EmbeddingProviderName, str]] = {
     "openai": "text-embedding-3-small",
+    "ollama": "nomic-embed-text",
 }
+
+#: Providers that speak the OpenAI wire format and therefore share one client
+#: implementation, differing only in base URL and credentials.
+OPENAI_COMPATIBLE: Final[frozenset[str]] = frozenset({"openai", "ollama"})
 
 
 class Settings(BaseSettings):
@@ -79,6 +85,10 @@ class Settings(BaseSettings):
             "format (Azure OpenAI, a gateway, a proxy) works without code changes."
         ),
     )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434/v1",
+        description="Ollama's OpenAI-compatible endpoint. Note the /v1 suffix.",
+    )
 
     request_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     max_retries: int = Field(default=3, ge=0, le=10)
@@ -123,6 +133,10 @@ class Settings(BaseSettings):
         """The embedding model to use, falling back to the provider's default."""
         return self.embedding_model or DEFAULT_EMBEDDING_MODELS[self.embedding_provider]
 
+    def base_url_for(self, provider: str) -> str | None:
+        """Return the endpoint for an OpenAI-compatible provider, if it has one."""
+        return self.ollama_base_url if provider == "ollama" else self.openai_base_url
+
     # -- Cross-field validation -------------------------------------------
     @model_validator(mode="after")
     def _check_chunking(self) -> Self:
@@ -136,7 +150,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_credentials(self) -> Self:
-        """Fail at startup when a selected provider has no usable credential."""
+        """Fail at startup when a selected provider has no usable credential.
+
+        Ollama is deliberately exempt: a local runtime needs no key, which is
+        what makes the zero-credential quickstart possible.
+        """
         missing: list[str] = []
         if self.llm_provider == "openai" and self.openai_api_key is None:
             missing.append("OPENAI_API_KEY (required by CITELY_LLM_PROVIDER=openai)")
