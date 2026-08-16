@@ -22,6 +22,8 @@ dependencies = [
     "typer>=0.15",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    "openai>=1.55",
+    "anthropic>=0.40",
 ]
 
 [project.urls]
