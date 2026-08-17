@@ -24,6 +24,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "openai>=1.55",
     "anthropic>=0.40",
+    "chromadb>=0.5",
 ]
 
 [project.urls]
@@ -106,8 +107,14 @@ show_error_codes = true
 pretty = true
 files = ["src", "tests", "evals"]
 
+# chromadb drags in numpy, whose bundled stubs use `type` statements that mypy
+# only parses under python_version >= 3.12. We type-check against 3.11 (our
+# minimum), and never touch numpy directly, so both are skipped rather than
+# raising the type-checking target and losing 3.11 compatibility checks.
 [[tool.mypy.overrides]]
-module = ["chromadb.*"]
+module = ["chromadb", "chromadb.*", "numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
