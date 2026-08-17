@@ -41,3 +41,8 @@ jobs:
 
       - name: Test
         run: uv run pytest -m "not live" --cov --cov-report=term-missing
+
+      # Offline stubs: gates the guardrails and the harness, not model quality.
+      # `make eval-live` measures the real system and needs API keys.
+      - name: Evaluate
+        run: uv run python -m evals.run --offline

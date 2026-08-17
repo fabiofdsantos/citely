@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format typecheck test test-live eval run check clean
+.PHONY: help install lint format typecheck test test-live eval eval-live run check clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -26,13 +26,16 @@ test:  ## Run the test suite (live provider tests deselected)
 test-live:  ## Run tests that hit real provider APIs (needs API keys)
 	uv run pytest -m live
 
-eval:  ## Run the evaluation suite against the golden dataset
-	uv run python -m evals.run
+eval:  ## Run the evaluation suite with offline stubs (no API key needed)
+	uv run python -m evals.run --offline
+
+eval-live:  ## Run the evaluation suite against the configured providers
+	uv run python -m evals.run --live
 
 run:  ## Start the API with autoreload
 	uv run uvicorn citely.api.app:create_app --factory --reload
 
-check: lint typecheck test  ## Everything CI runs
+check: lint typecheck test eval  ## Everything CI runs
 
 clean:  ## Remove build and cache artefacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov dist build

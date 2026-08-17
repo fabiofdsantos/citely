@@ -25,6 +25,7 @@ dependencies = [
     "openai>=1.55",
     "anthropic>=0.40",
     "chromadb>=0.5",
+    "pyyaml>=6.0.3",
 ]
 
 [project.urls]
@@ -48,6 +49,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "ruff>=0.8",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 # ---------------------------------------------------------------------------
