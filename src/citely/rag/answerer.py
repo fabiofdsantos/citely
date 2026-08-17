@@ -22,6 +22,7 @@ from citely.models import Answer, RetrievalResult, ScoredChunk
 from citely.providers.base import Message
 from citely.rag.guardrails import validate_query, verify_citations
 from citely.rag.prompts import SYSTEM_PROMPT, build_user_message, select_within_budget
+from citely.tracing import aspan, span
 
 if TYPE_CHECKING:
     from citely.providers.base import LLMProvider
@@ -161,21 +162,30 @@ class Answerer:
                 model_declined=declined,
             )
 
-        completion = await self._llm.complete(
-            system=SYSTEM_PROMPT,
-            messages=[Message(role="user", content=build_user_message(query, sources))],
-            max_tokens=self._max_answer_tokens,
-        )
+        async with aspan("generation", sources=len(sources)) as gen:
+            completion = await self._llm.complete(
+                system=SYSTEM_PROMPT,
+                messages=[Message(role="user", content=build_user_message(query, sources))],
+                max_tokens=self._max_answer_tokens,
+            )
+            gen.update(
+                model=completion.model,
+                input_tokens=completion.usage.input_tokens,
+                output_tokens=completion.usage.output_tokens,
+                truncated=completion.truncated,
+            )
         parsed = parse_model_answer(completion.text)
 
         if parsed.insufficient_context:
             trace = trace_for(declined=True)
             return self._refuse(query, parsed.reason or NO_SOURCES, model=completion.model), trace
 
-        verified, rejected = verify_citations(
-            [(c.source, c.quote) for c in parsed.citations],
-            sources,
-        )
+        with span("verification", claimed=len(parsed.citations)) as check:
+            verified, rejected = verify_citations(
+                [(c.source, c.quote) for c in parsed.citations],
+                sources,
+            )
+            check.update(verified=len(verified), rejected=len(rejected))
         trace = trace_for(
             claimed=len(parsed.citations),
             verified=len(verified),
