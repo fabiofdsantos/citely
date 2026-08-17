@@ -42,10 +42,19 @@ downstream can catch that, so [`rag/scope.py`](../src/citely/rag/scope.py)
 refuses when the question names something no retrieved source mentions.
 
 Deliberately conservative — the risk is trading a rare wrong answer for frequent
-wrong refusals, so only terms absent from *every* retrieved chunk count, generic
-domain words are ignored, and five of its twenty tests assert it does *not* fire
-on answerable questions. Measured effect: `refusal_accuracy` 0.90 → 1.00 with
-`answer_accuracy` unchanged.
+wrong refusals, so only terms absent from *every* retrieved chunk count and
+several tests assert it does *not* fire on answerable questions. Measured
+effect: `refusal_accuracy` 0.90 → 1.00 with `answer_accuracy` unchanged.
+
+**No domain vocabulary is hardcoded.** Only English function and question words
+live in the module; nouns a corpus is saturated with — `regulation` for
+legislation, `patient` for clinical notes, `incident` for runbooks — go in
+`CITELY_SCOPE_IGNORE_TERMS`. An earlier version baked AI-Act words like `act`,
+`regulation` and `artificial` into the checker, which worked for the demo corpus
+and silently made the code less portable than the README claimed. Removing them
+dropped offline `answer_accuracy` from 0.70 to 0.60 until the demo corpus's own
+vocabulary was supplied through config — the leakage was load-bearing, which is
+exactly why it was worth moving rather than deleting.
 
 **Token budget, not fixed `k`.** A fixed count overflows a small model's context
 window and wastes a large one's. The top hit is always kept, even over budget.

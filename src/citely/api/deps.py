@@ -49,6 +49,7 @@ class AppState:
                 llm,
                 max_context_tokens=settings.max_context_tokens,
                 scope_check=settings.scope_check,
+                scope_ignore_terms=settings.scope_ignored_terms,
             ),
         )
 

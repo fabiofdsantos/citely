@@ -65,9 +65,20 @@ Then set `CITELY_LLM_PROVIDER=ollama`, `CITELY_EMBEDDING_PROVIDER=ollama` and
 `CITELY_LLM_MODEL=llama3.2:3b` in `.env`. Docker on macOS has no GPU access, so
 this is CPU-only and slow; `brew install ollama` gets Metal.
 
-**Your own documents:** `CITELY_CORPUS_PATH=./my-docs citely ingest`. Any
-directory of `.txt`, `.md`, `.markdown` or `.rst`. Re-running is cheap —
+**Your own documents:**
+
+```bash
+CITELY_CORPUS_PATH=./my-docs citely ingest
+```
+
+Any directory of `.txt`, `.md`, `.markdown` or `.rst`. Re-running is cheap —
 unchanged content is never re-embedded, deleted content is dropped.
+
+Nothing in the code assumes a subject: the EU AI Act is just the shipped demo.
+Corpus-specific vocabulary lives in `CITELY_SCOPE_IGNORE_TERMS` — words your
+documents are saturated with, which therefore say nothing about whether a
+question is answerable from them (`regulation` for legislation, `patient` for
+clinical notes, `incident` for runbooks).
 
 ## How it works
 
@@ -112,6 +123,7 @@ Environment variables, validated at startup. Full list in
 | `CITELY_TOP_K` | `6` | Chunks retrieved per query |
 | `CITELY_MIN_SCORE` | `0.0` | Drop matches below this similarity |
 | `CITELY_SCOPE_CHECK` | `true` | Refuse when the question names something no source mentions |
+| `CITELY_SCOPE_IGNORE_TERMS` | — | Corpus vocabulary the scope check should ignore |
 | `CITELY_MAX_CONTEXT_TOKENS` | `6000` | Lower it for small local models |
 
 Keys are also read from plain `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, held as
@@ -151,7 +163,7 @@ make help        # all targets
 make check       # lint + type-check + test + eval, same as CI
 ```
 
-Python 3.11+, mypy strict, ruff, 215 tests at 96% coverage. Backends are tested
+Python 3.11+, mypy strict, ruff, 217 tests at 96% coverage. Backends are tested
 with fakes for logic and against real Chroma and real Postgres for behaviour;
 CI runs both, plus pre-commit and a coverage gate. pgvector tests skip cleanly
 without a database — see [docs/design.md](docs/design.md#testing).

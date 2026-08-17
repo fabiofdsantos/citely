@@ -153,6 +153,7 @@ async def _run_query(settings: Settings, question: str, k: int | None) -> Answer
             llm,
             max_context_tokens=settings.max_context_tokens,
             scope_check=settings.scope_check,
+            scope_ignore_terms=settings.scope_ignored_terms,
         )
         return await answerer.answer(question, k=k)
     finally:

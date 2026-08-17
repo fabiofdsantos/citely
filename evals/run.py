@@ -40,6 +40,12 @@ from evals.dataset import CORPUS_PATH, Case, load_golden
 from evals.metrics import CaseResult, Report, Thresholds, summarise
 from evals.offline import ExtractiveLLM, HashingEmbedder
 
+#: Words this corpus is saturated with, which therefore say nothing about
+#: whether a question is answerable from it. Corpus vocabulary lives in
+#: configuration, never in the scope checker: a clinical or engineering corpus
+#: would list entirely different words here.
+EVAL_CORPUS_VOCABULARY = "ai,regulation,article,annex,union"
+
 #: Offline runs gate only on what the code guarantees, never on answer quality.
 OFFLINE_THRESHOLDS = Thresholds(
     groundedness=1.0,
@@ -63,6 +69,7 @@ def _build_offline(
         chunk_size=600,
         chunk_overlap=80,
         top_k=4,
+        scope_ignore_terms=EVAL_CORPUS_VOCABULARY,
     )
     return HashingEmbedder(), ExtractiveLLM(), ChromaVectorStore(settings), settings
 
@@ -72,7 +79,11 @@ def _build_live(chroma_path: Path) -> tuple[EmbeddingProvider, LLMProvider, Vect
     # user has built for real use.
     configured = get_settings()
     settings = configured.model_copy(
-        update={"chroma_path": chroma_path, "collection_name": "evals"}
+        update={
+            "chroma_path": chroma_path,
+            "collection_name": "evals",
+            "scope_ignore_terms": EVAL_CORPUS_VOCABULARY,
+        }
     )
     return (
         build_embedding_provider(settings),
@@ -118,6 +129,8 @@ async def evaluate(*, offline: bool, corpus: Path) -> Report:
                 ),
                 llm,
                 max_context_tokens=settings.max_context_tokens,
+                scope_check=settings.scope_check,
+                scope_ignore_terms=settings.scope_ignored_terms,
             )
             golden = load_golden()
             return summarise([await run_case(answerer, case) for case in golden.cases])

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -122,12 +123,14 @@ class Answerer:
         max_context_tokens: int = 6000,
         max_answer_tokens: int = 1024,
         scope_check: bool = True,
+        scope_ignore_terms: Collection[str] = (),
     ) -> None:
         self._retriever = retriever
         self._llm = llm
         self._max_context_tokens = max_context_tokens
         self._max_answer_tokens = max_answer_tokens
         self._scope_check = scope_check
+        self._scope_ignore_terms = scope_ignore_terms
 
     async def answer(self, question: str, *, k: int | None = None) -> Answer:
         """Answer a question, or refuse with a reason.
@@ -177,7 +180,7 @@ class Answerer:
         # than producing an answer that has to be thrown away.
         if self._scope_check:
             with span("scope_check") as scope:
-                reason = scope_refusal_reason(query, sources)
+                reason = scope_refusal_reason(query, sources, self._scope_ignore_terms)
                 scope.update(out_of_scope=reason is not None)
             if reason is not None:
                 return self._refuse(query, reason), trace_for(out_of_scope=True)

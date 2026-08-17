@@ -107,6 +107,15 @@ class Settings(BaseSettings):
         le=1.0,
         description="Chunks scoring below this are discarded before generation.",
     )
+    scope_ignore_terms: str = Field(
+        default="",
+        description=(
+            "Comma-separated words the scope check should not treat as "
+            "identifying. Use for nouns your corpus is saturated with "
+            "(Regulation, Patient, Runbook) which say nothing about whether a "
+            "question is answerable from it."
+        ),
+    )
     scope_check: bool = Field(
         default=True,
         description=(
@@ -147,6 +156,13 @@ class Settings(BaseSettings):
         return value
 
     # -- Derived values ----------------------------------------------------
+    @property
+    def scope_ignored_terms(self) -> frozenset[str]:
+        """``scope_ignore_terms`` parsed into a set."""
+        return frozenset(
+            term.strip().casefold() for term in self.scope_ignore_terms.split(",") if term.strip()
+        )
+
     @property
     def resolved_llm_model(self) -> str:
         """The chat model to use, falling back to the provider's default."""

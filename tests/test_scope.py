@@ -41,9 +41,16 @@ class TestTermExtraction:
         """Capitalised by grammar, so it carries no identity signal."""
         assert "what" not in identifying_terms("What does Article 5 prohibit?")
 
-    def test_ignores_generic_domain_words(self) -> None:
-        terms = identifying_terms("What obligations apply to AI Systems under the Regulation?")
-        assert terms == {}
+    def test_ignores_english_function_words(self) -> None:
+        """Only grammar words are hardcoded — no domain vocabulary."""
+        assert identifying_terms("What must they do under this?") == {}
+
+    def test_corpus_vocabulary_is_configurable(self) -> None:
+        """Domain nouns belong in config, so citely is not tied to one corpus."""
+        question = "What obligations apply to AI Systems under the Regulation?"
+
+        assert identifying_terms(question)  # AI, Systems, Regulation all count
+        assert identifying_terms(question, ignore=["ai", "systems", "regulation"]) == {}
 
     def test_captures_article_numbers(self) -> None:
         assert "17" in identifying_terms("What does Article 17 say?")
@@ -101,3 +108,31 @@ class TestScopeDecision:
 def test_answerable_questions_are_never_refused(question: str) -> None:
     """The regression that matters: this must not create new over-refusals."""
     assert scope_refusal_reason(question, sources()) is None
+
+
+def test_works_on_a_completely_different_domain() -> None:
+    """Nothing in the scope check assumes legislation.
+
+    The same code over clinical notes: an in-corpus drug name passes, one the
+    corpus never mentions is refused, and the corpus's own ubiquitous nouns are
+    configured away rather than special-cased in code.
+    """
+    clinical = sources(
+        "Amoxicillin is first-line therapy for community-acquired pneumonia in "
+        "adults. The patient should receive 500 mg three times daily for five days."
+    )
+
+    assert scope_refusal_reason("What dose of Amoxicillin is recommended?", clinical) is None
+    assert scope_refusal_reason("What is the dose for the patient?", clinical) is None
+
+    reason = scope_refusal_reason("What dose of Vancomycin is recommended?", clinical)
+    assert reason is not None
+    assert "Vancomycin" in reason
+
+    # "Patient" is this corpus's ubiquitous noun, exactly as "Regulation" is for
+    # legislation; configuring it away needs no code change.
+    unconfigured = sources("Amoxicillin is first-line therapy for pneumonia.")
+    assert scope_refusal_reason("Which Patient received it?", unconfigured) is not None
+    assert (
+        scope_refusal_reason("Which Patient received it?", unconfigured, ignore=["patient"]) is None
+    )
