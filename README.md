@@ -53,19 +53,35 @@ elif not self.citations:
 
 ```bash
 git clone https://github.com/fabiofdsantos/citely && cd citely
-cp .env.example .env      # add ANTHROPIC_API_KEY and OPENAI_API_KEY
+cp .env.example .env      # fill in ANTHROPIC_API_KEY and OPENAI_API_KEY
 docker compose up
 ```
 
-Then:
+Then index the bundled corpus — a curated extract of the **EU AI Act**, shipped
+with the repo so there is nothing to download — and ask it something:
 
 ```bash
 curl -X POST localhost:8000/ingest -H 'content-type: application/json' -d '{}'
 curl -X POST localhost:8000/query  -H 'content-type: application/json' \
-     -d '{"question":"What does Article 5 prohibit?"}'
+     -d '{"question":"What is the maximum fine for breaching the prohibitions?"}'
 ```
 
-Interactive API docs at <http://localhost:8000/docs>.
+```json
+{
+  "answer": "up to 35 000 000 EUR or, if the offender is an undertaking, up to 7 % of its total worldwide annual turnover for the preceding financial year, whichever is higher",
+  "citations": [{
+    "number": 1,
+    "source_uri": "/data/corpus/article-99-penalties.md",
+    "title": "Article 99: Penalties",
+    "quote": "Non-compliance with the prohibition of the AI practices referred to in Article 5 shall be subject to administrative fines of up to 35 000 000 EUR or, if the offender is an undertaking, up to 7 % of its total worldwide annual turnover for the preceding financial year, whichever is higher."
+  }],
+  "refused": false
+}
+```
+
+Interactive API docs at <http://localhost:8000/docs>. If the keys in `.env` are
+blank the service refuses to start and says which one is missing — use the
+zero-key path below instead.
 
 ### Without Docker
 
@@ -82,13 +98,26 @@ citely status       # what is currently indexed
 [Ollama](https://ollama.com) runs everything locally, and your documents never
 leave the machine:
 
+In Docker, with no local install:
+
 ```bash
-ollama pull llama3.1:8b && ollama pull nomic-embed-text
+docker compose --profile local up -d ollama
+docker compose exec ollama ollama pull llama3.2:3b
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
+Set `CITELY_LLM_PROVIDER=ollama`, `CITELY_EMBEDDING_PROVIDER=ollama` and
+`CITELY_LLM_MODEL=llama3.2:3b` in `.env`, then `docker compose up`. Note that
+Docker on macOS has no GPU access, so inference is CPU-only and slow; a native
+`brew install ollama` gets Metal.
+
+Or against a locally installed Ollama:
+
+```bash
+ollama pull llama3.2:3b && ollama pull nomic-embed-text
 export CITELY_LLM_PROVIDER=ollama CITELY_EMBEDDING_PROVIDER=ollama
 citely ingest && citely query "what does article 5 prohibit?"
 ```
-
-Or in Docker: `docker compose --profile local up`.
 
 ### Bring your own documents
 
@@ -99,6 +128,11 @@ CITELY_CORPUS_PATH=./my-docs citely ingest
 Any directory of `.txt`, `.md`, `.markdown` or `.rst` files. Re-running is cheap
 and safe: unchanged content is never re-embedded, and deleted content is removed
 from the index.
+
+The default corpus lives in [`data/corpus/`](data/corpus) — ten articles of
+Regulation (EU) 2024/1689, with provenance in [`data/README.md`](data/README.md).
+It is an *extract*, not the full Regulation, which makes it a better demo:
+questions about the missing articles are exactly the ones citely should refuse.
 
 ## Architecture
 
@@ -314,7 +348,7 @@ make test-live   # tests that hit real provider APIs (needs keys)
 - Python 3.11+, fully type-hinted, **mypy strict**, no `Any` escapes in the
   domain.
 - ruff for lint and format; pre-commit runs both plus secret detection.
-- ~190 tests. Provider and store backends are tested twice: with fakes for
+- 202 tests, 90% coverage. Provider and store backends are tested twice: with fakes for
   logic, and against real Chroma / real Postgres for behaviour.
 
 ```bash

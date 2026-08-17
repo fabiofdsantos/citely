@@ -129,7 +129,7 @@ class PgVectorStore:
                         metadata = EXCLUDED.metadata,
                         embedding = EXCLUDED.embedding,
                         embedding_model = EXCLUDED.embedding_model
-                    """,  # noqa: S608 - table name is validated, never user input
+                    """,
                     [
                         (
                             c.chunk.chunk_id,
@@ -232,7 +232,7 @@ class PgVectorStore:
                     FROM {self._table}{where}
                     ORDER BY distance
                     LIMIT {int(k)}
-                    """,  # noqa: S608 - identifier validated, k coerced to int
+                    """,
                     params,
                 )
                 rows = await cursor.fetchall()
@@ -266,7 +266,7 @@ class PgVectorStore:
                            MIN(embedding_model) AS model,
                            MIN(vector_dims(embedding)) AS dims
                     FROM {self._table}
-                    """  # noqa: S608 - validated identifier
+                    """
                 )
                 row = await cursor.fetchone()
         except Exception as exc:
