@@ -19,6 +19,23 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
+    # Postgres with pgvector, so the production store is verified in CI rather
+    # than only on whichever machine last ran it by hand.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: citely
+          POSTGRES_PASSWORD: citely
+          POSTGRES_DB: citely
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U citely -d citely"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -41,8 +58,15 @@ jobs:
 
       - name: Test
         run: uv run pytest -m "not live" --cov --cov-report=term-missing
+        env:
+          CITELY_TEST_PGVECTOR_DSN: postgresql://citely:citely@localhost:5432/citely
 
       # Offline stubs: gates the guardrails and the harness, not model quality.
       # `make eval-live` measures the real system and needs API keys.
       - name: Evaluate
         run: uv run python -m evals.run --offline
+
+      # The hooks are part of the contributor workflow, so a broken hook config
+      # should fail here rather than on someone's first commit.
+      - name: Pre-commit
+        run: uv run pre-commit run --all-files

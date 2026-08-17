@@ -47,6 +47,7 @@ packages = ["src/citely"]
 dev = [
     "httpx>=0.27",
     "mypy>=1.13",
+    "pre-commit>=4.6.2",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
@@ -145,6 +146,9 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
+# Set just below the current 90%: high enough to catch a real drop, low enough
+# not to fail on a rounding change. Raise it as coverage genuinely improves.
+fail_under = 85
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
