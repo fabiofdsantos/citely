@@ -6,13 +6,14 @@ embedder patched in — so they catch wiring failures that unit tests cannot.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from citely.cli import app
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, FakeLLM
 
 runner = CliRunner()
 
@@ -90,3 +91,61 @@ def test_configuration_errors_exit_with_code_two(monkeypatch: pytest.MonkeyPatch
 
     assert result.exit_code == 2
     assert "configuration error" in result.output
+
+
+def test_query_prints_answer_and_sources(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # One chunk for the whole file, so the source the model cites is knowable
+    # from the test rather than dependent on the stub embedder's ranking.
+    monkeypatch.setenv("CITELY_CHUNK_SIZE", "2000")
+    runner.invoke(app, ["ingest"])
+    monkeypatch.setattr(
+        "citely.cli.build_llm_provider",
+        lambda _settings: FakeLLM(
+            json.dumps(
+                {
+                    "answer": "Article 0 says something [1].",
+                    "citations": [{"source": 1, "quote": "Article 0 says something."}],
+                    "insufficient_context": False,
+                    "reason": None,
+                }
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["query", "what does article 0 say?"])
+
+    assert result.exit_code == 0, result.output
+    assert "Article 0 says something" in result.output
+    assert "Sources:" in result.output
+
+
+def test_query_prints_a_refusal_without_sources(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner.invoke(app, ["ingest"])
+    monkeypatch.setattr(
+        "citely.cli.build_llm_provider",
+        lambda _settings: FakeLLM(
+            json.dumps(
+                {
+                    "answer": "",
+                    "citations": [],
+                    "insufficient_context": True,
+                    "reason": "the corpus does not cover this",
+                }
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["query", "what is the capital of France?"])
+
+    assert result.exit_code == 0, result.output
+    assert "does not cover" in result.output
+    assert "Sources:" not in result.output
+
+
+def test_empty_question_exits_with_code_two(workspace: Path) -> None:
+    result = runner.invoke(app, ["query", "  "])
+
+    assert result.exit_code == 2
+    assert "invalid question" in result.output

@@ -16,7 +16,11 @@ from citely import __version__
 from citely.config import Settings, get_settings
 from citely.errors import CitelyError
 from citely.ingest.pipeline import IngestReport, ingest_path
-from citely.providers.registry import build_embedding_provider
+from citely.models import Answer
+from citely.providers.registry import build_embedding_provider, build_llm_provider
+from citely.rag.answerer import Answerer
+from citely.rag.guardrails import InvalidQueryError
+from citely.rag.retriever import VectorRetriever
 from citely.stores.registry import build_vector_store
 
 app = typer.Typer(
@@ -104,6 +108,55 @@ def _print_report(report: IngestReport, corpus: Path) -> None:
         f"{report.embedded} embedded, {report.skipped} skipped, {report.deleted} deleted"
     )
     typer.secho(summary, fg=typer.colors.GREEN if report.embedded else typer.colors.BLUE)
+
+
+@app.command()
+def query(
+    question: Annotated[str, typer.Argument(help="The question to answer from the corpus.")],
+    k: Annotated[int | None, typer.Option("--top-k", help="Chunks to retrieve.")] = None,
+) -> None:
+    """Answer a question from the indexed corpus, with citations."""
+    settings = _load_settings()
+
+    try:
+        answer = asyncio.run(_run_query(settings, question, k))
+    except InvalidQueryError as exc:
+        typer.secho(f"invalid question: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
+    except CitelyError as exc:
+        typer.secho(f"{exc.code}: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if answer.refused:
+        typer.secho(answer.text, fg=typer.colors.YELLOW)
+        return
+
+    typer.echo(answer.text)
+    typer.echo("\nSources:")
+    for number, citation in enumerate(answer.citations, start=1):
+        typer.echo(f'  [{number}] {citation.title or citation.source_uri} — "{citation.quote}"')
+        typer.echo(f"      {citation.source_uri}#{citation.chunk_id}")
+
+
+async def _run_query(settings: Settings, question: str, k: int | None) -> Answer:
+    embedder = build_embedding_provider(settings)
+    llm = build_llm_provider(settings)
+    try:
+        retriever = VectorRetriever(
+            embedder,
+            build_vector_store(settings),
+            top_k=settings.top_k,
+            min_score=settings.min_score,
+        )
+        answerer = Answerer(
+            retriever,
+            llm,
+            max_context_tokens=settings.max_context_tokens,
+        )
+        return await answerer.answer(question, k=k)
+    finally:
+        await embedder.aclose()
+        await llm.aclose()
 
 
 @app.command()

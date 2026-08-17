@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 
 from citely.errors import EmbeddingMismatchError
 from citely.models import EmbeddedChunk, ScoredChunk
+from citely.providers.base import Completion, TokenUsage
 from citely.stores.base import StoreHealth, UpsertResult
 
 
@@ -230,3 +231,35 @@ class InMemoryVectorStore:
             embedding_model=self._model,
             dimensions=self._dimensions,
         )
+
+
+class FakeLLM:
+    """Replays canned completions and records the prompts it was given."""
+
+    def __init__(self, *responses: str, model: str = "fake-llm") -> None:
+        self._responses = list(responses) or ["{}"]
+        self._model = model
+        self.prompts: list[tuple[str, str]] = []
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        messages: Sequence[Any],
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> Completion:
+        self.prompts.append((system, messages[-1].content))
+        text = self._responses.pop(0) if len(self._responses) > 1 else self._responses[0]
+        return Completion(
+            text=text,
+            model=self._model,
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+        )
+
+    async def aclose(self) -> None:
+        return None
