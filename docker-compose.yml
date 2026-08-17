@@ -15,6 +15,9 @@ services:
       CITELY_CHROMA_PATH: /data/chroma
       CITELY_CORPUS_PATH: /data/corpus
       CITELY_LOG_FORMAT: json
+      # Inside the network, Ollama is a sibling container, not localhost.
+      # Harmless unless CITELY_LLM_PROVIDER=ollama actually selects it.
+      CITELY_OLLAMA_BASE_URL: http://ollama:11434/v1
     volumes:
       # The corpus is mounted read-only: the service indexes documents, it has
       # no business modifying them.
@@ -29,6 +32,9 @@ services:
   ollama:
     image: ollama/ollama:latest
     profiles: [local]
+    # Pull the models once the service is up:
+    #   docker compose exec ollama ollama pull llama3.2:3b
+    #   docker compose exec ollama ollama pull nomic-embed-text
     ports:
       - "11434:11434"
     volumes:
