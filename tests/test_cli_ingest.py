@@ -137,7 +137,9 @@ def test_query_prints_a_refusal_without_sources(
         ),
     )
 
-    result = runner.invoke(app, ["query", "what is the capital of France?"])
+    # No proper nouns, so the scope check passes it through to the model, whose
+    # own "insufficient context" refusal is what this test covers.
+    result = runner.invoke(app, ["query", "does the act require annual audits?"])
 
     assert result.exit_code == 0, result.output
     assert "does not cover" in result.output

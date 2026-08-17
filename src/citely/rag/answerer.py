@@ -22,6 +22,7 @@ from citely.models import Answer, RetrievalResult, ScoredChunk
 from citely.providers.base import Message
 from citely.rag.guardrails import validate_query, verify_citations
 from citely.rag.prompts import SYSTEM_PROMPT, build_user_message, select_within_budget
+from citely.rag.scope import scope_refusal_reason
 from citely.tracing import aspan, span
 
 if TYPE_CHECKING:
@@ -100,6 +101,10 @@ class AnswerTrace(BaseModel):
     verified_citations: int = Field(ge=0, default=0)
     rejections: list[str] = Field(default_factory=list)
     model_declined: bool = False
+    out_of_scope: bool = Field(
+        default=False,
+        description="The scope check refused before any generation happened.",
+    )
 
     @property
     def fabricated_citations(self) -> int:
@@ -116,11 +121,13 @@ class Answerer:
         *,
         max_context_tokens: int = 6000,
         max_answer_tokens: int = 1024,
+        scope_check: bool = True,
     ) -> None:
         self._retriever = retriever
         self._llm = llm
         self._max_context_tokens = max_context_tokens
         self._max_answer_tokens = max_answer_tokens
+        self._scope_check = scope_check
 
     async def answer(self, question: str, *, k: int | None = None) -> Answer:
         """Answer a question, or refuse with a reason.
@@ -150,6 +157,7 @@ class Answerer:
             verified: int = 0,
             rejections: list[str] | None = None,
             declined: bool = False,
+            out_of_scope: bool = False,
         ) -> AnswerTrace:
             return AnswerTrace(
                 retrieved=len(result.chunks),
@@ -160,7 +168,19 @@ class Answerer:
                 verified_citations=verified,
                 rejections=rejections or [],
                 model_declined=declined,
+                out_of_scope=out_of_scope,
             )
+
+        # Checked before generation. An off-target answer is fluent, correctly
+        # cited, and indistinguishable from a good one downstream, so nothing
+        # later in the pipeline can catch it. Skipping the call is also cheaper
+        # than producing an answer that has to be thrown away.
+        if self._scope_check:
+            with span("scope_check") as scope:
+                reason = scope_refusal_reason(query, sources)
+                scope.update(out_of_scope=reason is not None)
+            if reason is not None:
+                return self._refuse(query, reason), trace_for(out_of_scope=True)
 
         async with aspan("generation", sources=len(sources)) as gen:
             completion = await self._llm.complete(

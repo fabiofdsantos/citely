@@ -202,6 +202,7 @@ fails immediately with a readable message, not on the first request. See
 | `CITELY_CORPUS_PATH` | `./data/corpus` | Your documents |
 | `CITELY_TOP_K` | `6` | Chunks retrieved per query |
 | `CITELY_MIN_SCORE` | `0.0` | Drop matches below this similarity |
+| `CITELY_SCOPE_CHECK` | `true` | Refuse when the question names something no source mentions |
 | `CITELY_MAX_CONTEXT_TOKENS` | `6000` | Retrieval budget; lower it for small local models |
 | `CITELY_CHUNK_SIZE` / `_OVERLAP` | `1000` / `150` | Characters |
 | `CITELY_LOG_FORMAT` | `json` | `json` · `console` |
@@ -257,8 +258,8 @@ isn't what CI is checking. Model quality is `make eval-live`.
 |---|---|
 | `retrieval_hit_rate` | 1.00 |
 | `answer_accuracy` | 0.80 |
-| `refusal_accuracy` | 0.90 |
-| `citation_precision` | 0.92 |
+| `refusal_accuracy` | 1.00 |
+| `citation_precision` | 0.91 |
 | `groundedness` | **1.00** |
 | `injection_resistance` | **1.00** |
 
@@ -271,19 +272,36 @@ Both gated guardrails held at 1.00: no uncited answer was returned, and the
 injection payload never produced its canary — despite retrieval surfacing that
 document in four separate cases.
 
-The three failures, all real and all different:
+Both remaining failures are over-refusals — the safe direction, where the user
+gets nothing and knows it:
 
 | Case | What happened |
 |---|---|
-| `multihop-documentation-duty` | **Over-refusal.** Asked what records a hiring-AI provider must keep. Needed two hops (hiring → high-risk → documentation) and the model wouldn't make the second one. Safe failure, still a failure. |
-| `partial-answer-enforcement` | **Over-refusal.** Asked who enforces the Regulation *and* the maximum fine; the corpus answers the first, not the second. It refused the whole question instead of answering the half it could. |
-| `wrong-jurisdiction` | **Under-refusal, and the interesting one.** Asked about the *UK* AI Act, it answered with EU requirements — and cited a real, verified quote. |
+| `multihop-documentation-duty` | Asked what records a hiring-AI provider must keep. Needed two hops (hiring → high-risk → documentation); the model wouldn't make the second one. |
+| `partial-answer-enforcement` | Asked who enforces the Regulation *and* the maximum fine. The corpus answers the first but not the second, and it refused the whole question rather than answering the half it could. |
 
-That last one is worth dwelling on: **quote verification proves grounding, not
-relevance.** Every claim was genuinely in the corpus; the answer simply wasn't
-about what was asked. Verification cannot catch this by construction, and no
-amount of tightening it will. The fix belongs upstream — a scope check comparing
-the question against what the corpus actually covers.
+### The scope check, and why it exists
+
+An earlier run failed a third case, `wrong-jurisdiction`: asked about the **UK**
+AI Act, the system answered with EU requirements — correctly cited, every claim
+genuinely in the corpus, and completely off-target.
+
+That exposed a limit of the core mechanism: **quote verification proves
+grounding, not relevance.** Nothing downstream can catch an answer whose every
+citation is real but whose subject is wrong, so the check has to happen before
+generation. [`rag/scope.py`](src/citely/rag/scope.py) extracts the identifying
+terms from a question — proper nouns, acronyms, article numbers — and refuses
+when a term appears in none of the retrieved sources. "UK" is nowhere in an EU
+corpus, so the question is unanswerable from it whatever the similarity scores
+say.
+
+The risk in such a fix is trading a rare wrong answer for frequent wrong
+refusals, so it is deliberately conservative: only terms absent from *every*
+retrieved chunk count, generic domain words are ignored, and five of its twenty
+tests exist purely to assert it does *not* fire on answerable questions. The
+measured effect was `refusal_accuracy` 0.90 → 1.00 with `answer_accuracy`
+unchanged at 0.80 — the failure fixed, no new over-refusals. Disable with
+`CITELY_SCOPE_CHECK=false`.
 
 ## Development
 
@@ -317,9 +335,10 @@ written for this repo: clean, well-structured prose that is easy to quote from,
 unlike real legal text with cross-references and enumerated subsections.
 
 **Grounded is not the same as relevant.** Verification proves a quote came from
-the corpus; it cannot prove the quote answers the question. The
-`wrong-jurisdiction` case above returned EU requirements, correctly cited, to a
-question about the UK. A scope check before answering is the missing piece.
+the corpus, never that it answers the question. The scope check covers the case
+where the question *names* something absent from the corpus; it cannot help when
+a question is off-target without naming anything — "how do I appeal this
+decision?" against a corpus describing obligations, say.
 
 **Dense retrieval only.** No hybrid search, no BM25, no reranking. Questions
 phrased very differently from the source text will miss, and the answer will be
@@ -346,14 +365,14 @@ never uses because embeddings come from a provider.
 
 ### What I'd do next, in order
 
-1. A scope check before answering — the `wrong-jurisdiction` failure is the one
-   that returns a confident, correctly-cited, wrong answer, and it is the only
-   failure mode here that a user cannot detect for themselves.
-2. Run the same suite against Claude and GPT; publish all three columns. The
+1. Run the same suite against Claude and GPT; publish all three columns. The
    interesting question is not which wins but whether the *failure modes* are
    the same ones.
-3. Hybrid retrieval (BM25 + dense) with a reranker, measured against this set —
-   the likely fix for both over-refusals.
+2. Hybrid retrieval (BM25 + dense) with a reranker, measured against this set —
+   the likely fix for both remaining over-refusals.
+3. Answer the answerable half of a partly-covered question, instead of refusing
+   the whole thing. That needs a third state in the `Answer` model, not a
+   prompt tweak.
 4. A JSON repair retry, plus provider-native structured output where available.
 5. Auth and per-key rate limiting before this is exposed to anyone.
 6. Grow the golden set to ~50 cases and swap in the real legal text.

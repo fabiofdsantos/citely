@@ -267,7 +267,9 @@ class TestAnswering:
     ) -> None:
         llm = FakeLLM(model_json(answer="", citations=[], insufficient=True, reason="not covered"))
 
-        answer = await Answerer(retriever, llm).answer("what is the capital of France?")
+        # Deliberately free of proper nouns, so it passes the scope check and
+        # reaches the model: this test is about the model's own refusal path.
+        answer = await Answerer(retriever, llm).answer("does the act require annual audits?")
 
         assert answer.refused
         assert answer.refusal_reason == "not covered"
@@ -356,3 +358,36 @@ class TestAnswering:
 class _EmptyRetriever:
     async def retrieve(self, query: str, *, k: int | None = None) -> RetrievalResult:
         return RetrievalResult(query=query, chunks=[])
+
+
+class TestScopeIntegration:
+    """The scope check as wired into the answerer."""
+
+    async def test_out_of_scope_question_refuses_without_generating(
+        self, retriever: VectorRetriever
+    ) -> None:
+        """The measured failure: a grounded answer to a question about the UK."""
+        llm = FakeLLM(model_json())
+
+        answer, trace = await Answerer(retriever, llm).answer_with_trace(
+            "What does the UK AI Act prohibit?"
+        )
+
+        assert answer.refused
+        assert trace.out_of_scope
+        assert llm.prompts == [], "no model call should be made for an out-of-scope question"
+
+    async def test_in_scope_question_still_answers(self, retriever: VectorRetriever) -> None:
+        answer = await Answerer(retriever, FakeLLM(model_json())).answer(
+            "what does article 5 prohibit?"
+        )
+
+        assert not answer.refused
+
+    async def test_scope_check_can_be_disabled(self, retriever: VectorRetriever) -> None:
+        """A corpus of proper nouns the questions never repeat may want it off."""
+        answerer = Answerer(retriever, FakeLLM(model_json()), scope_check=False)
+
+        answer = await answerer.answer("What does the UK AI Act prohibit?")
+
+        assert not answer.refused

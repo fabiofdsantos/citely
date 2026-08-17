@@ -44,7 +44,12 @@ class AppState:
             embedder=embedder,
             llm=llm,
             store=store,
-            answerer=Answerer(retriever, llm, max_context_tokens=settings.max_context_tokens),
+            answerer=Answerer(
+                retriever,
+                llm,
+                max_context_tokens=settings.max_context_tokens,
+                scope_check=settings.scope_check,
+            ),
         )
 
     async def aclose(self) -> None:

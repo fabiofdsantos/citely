@@ -152,6 +152,7 @@ async def _run_query(settings: Settings, question: str, k: int | None) -> Answer
             retriever,
             llm,
             max_context_tokens=settings.max_context_tokens,
+            scope_check=settings.scope_check,
         )
         return await answerer.answer(question, k=k)
     finally:

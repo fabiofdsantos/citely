@@ -107,6 +107,14 @@ class Settings(BaseSettings):
         le=1.0,
         description="Chunks scoring below this are discarded before generation.",
     )
+    scope_check: bool = Field(
+        default=True,
+        description=(
+            "Refuse before generating when the question names something the "
+            "retrieved sources never mention. Guards against grounded answers "
+            "to questions the corpus does not actually cover."
+        ),
+    )
     max_context_tokens: int = Field(
         default=6000,
         ge=256,
