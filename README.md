@@ -1,47 +1,48 @@
 # citely
 
-**Retrieval-Augmented Generation (RAG) as a Service** — provider-agnostic, and
-built so every claim in an answer is traceable to a source.
+**Retrieval-Augmented Generation (RAG) as a Service** — provider-agnostic, with
+every claim traceable to a source.
 
-Ask a question over your documents. citely retrieves the relevant passages, asks
-a model to answer using only those passages, and then **verifies every citation
-against the source text before returning anything**. A claim the model cannot
-back with a real quote is not shown — the service refuses instead.
+citely retrieves passages, asks a model to answer using only those passages, then
+**verifies every citation against the source text before returning anything**. A
+claim the model can't back with a real quote is never shown — the service refuses
+instead.
 
 ```console
-$ citely query "What does Article 5 prohibit?"
-Article 5 prohibits social scoring of natural persons by public authorities [1].
+$ citely query "What is the maximum fine for breaching the prohibitions?"
+up to 35 000 000 EUR or, if the offender is an undertaking, up to 7 % of its
+total worldwide annual turnover for the preceding financial year [1].
 
 Sources:
-  [1] EU AI Act — "Article 5 sets out prohibited practices."
-      data/corpus/ai_act.md#a3f9c1e4b7d2
+  [1] Article 99: Penalties — "Non-compliance with the prohibition of the AI
+      practices referred to in Article 5 shall be subject to administrative
+      fines of up to 35 000 000 EUR..."
+      data/corpus/article-99-penalties.md#b08adc59688340d0
 
 $ citely query "What is the capital of France?"
-The corpus does not contain anything relevant to this question.
+The corpus does not mention France, so it cannot answer a question about that.
 ```
 
 [![CI](https://github.com/fabiofdsantos/citely/actions/workflows/ci.yml/badge.svg)](https://github.com/fabiofdsantos/citely/actions/workflows/ci.yml)
 
----
+## Why
 
-## Why this exists
-
-Most RAG demos retrieve some chunks, paste them into a prompt, and print
-whatever comes back. The model usually stays grounded — and when it doesn't,
-nothing notices. The failure is silent, fluent, and confident.
+Most RAG demos retrieve chunks, paste them into a prompt, and print whatever
+comes back. The model usually stays grounded — and when it doesn't, nothing
+notices. The failure is silent, fluent, and confident.
 
 citely closes that gap with one mechanism: **the model must supply a verbatim
 quote for every claim, and each quote is checked against the chunk it cites.**
 
-- Quote appears in the cited source → citation kept.
-- Quote is paraphrased, reworded, or invented → citation dropped.
-- No citations survive → the answer becomes an explicit refusal.
+- Quote appears in the cited source → citation kept
+- Paraphrased, reworded, or invented → citation dropped
+- No citations survive → explicit refusal
 
-This is enforced in code, not requested in a prompt. The `Answer` type itself
-cannot represent an uncited answer:
+Enforced in code, not requested in a prompt. The `Answer` type cannot represent
+an uncited answer:
 
 ```python
-# citely/models.py — a validator, not a convention
+# models.py — a validator, not a convention
 if self.refused:
     if not self.refusal_reason:
         raise ValueError("a refused answer must carry a refusal_reason")
@@ -57,48 +58,27 @@ cp .env.example .env      # fill in ANTHROPIC_API_KEY and OPENAI_API_KEY
 docker compose up
 ```
 
-Then index the bundled corpus — a curated extract of the **EU AI Act**, shipped
-with the repo so there is nothing to download — and ask it something:
+The repo ships a curated extract of the **EU AI Act** as the default corpus, so
+there's nothing to download:
 
 ```bash
 curl -X POST localhost:8000/ingest -H 'content-type: application/json' -d '{}'
 curl -X POST localhost:8000/query  -H 'content-type: application/json' \
-     -d '{"question":"What is the maximum fine for breaching the prohibitions?"}'
+     -d '{"question":"What does Article 5 prohibit?"}'
 ```
 
-```json
-{
-  "answer": "up to 35 000 000 EUR or, if the offender is an undertaking, up to 7 % of its total worldwide annual turnover for the preceding financial year, whichever is higher",
-  "citations": [{
-    "number": 1,
-    "source_uri": "/data/corpus/article-99-penalties.md",
-    "title": "Article 99: Penalties",
-    "quote": "Non-compliance with the prohibition of the AI practices referred to in Article 5 shall be subject to administrative fines of up to 35 000 000 EUR or, if the offender is an undertaking, up to 7 % of its total worldwide annual turnover for the preceding financial year, whichever is higher."
-  }],
-  "refused": false
-}
-```
+API docs at <http://localhost:8000/docs>. Blank keys in `.env` make the service
+refuse to start and name the missing one.
 
-Interactive API docs at <http://localhost:8000/docs>. If the keys in `.env` are
-blank the service refuses to start and says which one is missing — use the
-zero-key path below instead.
-
-### Without Docker
+**Without Docker:**
 
 ```bash
-make install        # uv sync + pre-commit hooks
-make check          # lint, type-check, tests, evals
-citely ingest       # index ./data/corpus
-citely query "what does article 5 prohibit?"
-citely status       # what is currently indexed
+make install && make check
+citely ingest && citely query "what does article 5 prohibit?"
 ```
 
-### Without API keys
-
-[Ollama](https://ollama.com) runs everything locally, and your documents never
-leave the machine:
-
-In Docker, with no local install:
+**Without API keys** — [Ollama](https://ollama.com), documents never leave your
+machine:
 
 ```bash
 docker compose --profile local up -d ollama
@@ -106,127 +86,105 @@ docker compose exec ollama ollama pull llama3.2:3b
 docker compose exec ollama ollama pull nomic-embed-text
 ```
 
-Set `CITELY_LLM_PROVIDER=ollama`, `CITELY_EMBEDDING_PROVIDER=ollama` and
-`CITELY_LLM_MODEL=llama3.2:3b` in `.env`, then `docker compose up`. Note that
-Docker on macOS has no GPU access, so inference is CPU-only and slow; a native
-`brew install ollama` gets Metal.
+Then set `CITELY_LLM_PROVIDER=ollama`, `CITELY_EMBEDDING_PROVIDER=ollama` and
+`CITELY_LLM_MODEL=llama3.2:3b` in `.env`. Note: Docker on macOS has no GPU
+access, so inference is CPU-only and slow; `brew install ollama` gets Metal.
 
-Or against a locally installed Ollama:
-
-```bash
-ollama pull llama3.2:3b && ollama pull nomic-embed-text
-export CITELY_LLM_PROVIDER=ollama CITELY_EMBEDDING_PROVIDER=ollama
-citely ingest && citely query "what does article 5 prohibit?"
-```
-
-### Bring your own documents
+**Your own documents:**
 
 ```bash
 CITELY_CORPUS_PATH=./my-docs citely ingest
 ```
 
-Any directory of `.txt`, `.md`, `.markdown` or `.rst` files. Re-running is cheap
-and safe: unchanged content is never re-embedded, and deleted content is removed
-from the index.
-
-The default corpus lives in [`data/corpus/`](data/corpus) — ten articles of
-Regulation (EU) 2024/1689, with provenance in [`data/README.md`](data/README.md).
-It is an *extract*, not the full Regulation, which makes it a better demo:
-questions about the missing articles are exactly the ones citely should refuse.
+Any directory of `.txt`, `.md`, `.markdown` or `.rst`. Re-running is cheap:
+unchanged content is never re-embedded, deleted content is dropped from the
+index.
 
 ## Architecture
 
 ```
-                       ┌──────────────┐        ┌──────────────┐
-   citely query  ──┐   │              │        │  Embeddings  │
-                   ├──▶│   Answerer   │───────▶│   provider   │
-   POST /query   ──┘   │              │        └──────────────┘
-                       └───┬──────────┘                │
-                           │                           ▼
-              ┌────────────┴─────────────┐     ┌──────────────┐
-              │ 1. validate the question │     │ Vector store │
-              │ 2. retrieve top-k chunks │◀────│ Chroma       │
-              │ 3. fit a token budget    │     │ pgvector     │
-              │ 4. generate (JSON)       │     └──────────────┘
-              │ 5. VERIFY every quote    │            ▲
-              │ 6. answer, or refuse     │            │
-              └──────────────────────────┘     ┌──────────────┐
-                           │                   │   Ingestion  │
-                           ▼                   │ load → chunk │
-                  ┌─────────────────┐          │ → embed →    │
-                  │ LLM provider    │          │ upsert       │
-                  │ Anthropic       │          └──────────────┘
-                  │ OpenAI / Ollama │                 ▲
-                  └─────────────────┘          citely ingest
-                                               POST /ingest
+   citely query ──┐                          ┌──────────────┐
+                  ├──▶  Answerer  ──────────▶│  Embeddings  │
+   POST /query  ──┘         │                │   provider   │
+                            ▼                └──────────────┘
+              ┌──────────────────────────┐          │
+              │ 1. validate the question │          ▼
+              │ 2. retrieve top-k chunks │   ┌──────────────┐
+              │ 3. check scope           │◀──│ Vector store │
+              │ 4. fit a token budget    │   │ Chroma       │
+              │ 5. generate (JSON)       │   │ pgvector     │
+              │ 6. VERIFY every quote    │   └──────────────┘
+              │ 7. answer, or refuse     │          ▲
+              └──────────────────────────┘          │
+                            │              ┌──────────────┐
+                            ▼              │   Ingestion  │
+                   ┌─────────────────┐     │ load → chunk │
+                   │  LLM provider   │     │ → embed →    │
+                   │ Anthropic /     │     │ upsert       │
+                   │ OpenAI / Ollama │     └──────────────┘
+                   └─────────────────┘      citely ingest
 ```
 
-Every arrow crossing a boundary is a `Protocol` — `LLMProvider`,
-`EmbeddingProvider`, `VectorStore`, `Retriever`. Backends are selected by
-configuration and constructed in one registry per layer; nothing else in the
-codebase imports a concrete provider.
+Every boundary is a `Protocol` — `LLMProvider`, `EmbeddingProvider`,
+`VectorStore`, `Retriever`. Backends are chosen by config in one registry per
+layer; nothing else imports a concrete provider.
 
 ```
 src/citely/
-├── config.py       Settings (pydantic-settings), validated at startup
-├── models.py       Domain types: Chunk, Citation, Answer
-├── errors.py       Error hierarchy with stable codes → HTTP statuses
-├── providers/      LLM + embedding backends behind two Protocols
-├── stores/         Chroma (default) and pgvector, behind one Protocol
-├── ingest/         Loading, structure-aware chunking, incremental pipeline
-├── rag/            Retrieval, prompts, guardrails, citation verification
-├── api/            FastAPI app, routes, wire schemas
-└── cli.py          citely ingest | query | status
-evals/              Golden dataset, metrics, runner
+├── config.py    Settings, validated at startup
+├── models.py    Chunk, Citation, Answer
+├── errors.py    Error hierarchy → HTTP statuses
+├── providers/   LLM + embedding backends
+├── stores/      Chroma (default), pgvector
+├── ingest/      Loading, chunking, incremental pipeline
+├── rag/         Retrieval, prompts, guardrails, verification
+├── api/         FastAPI app and wire schemas
+└── cli.py       citely ingest | query | status
 ```
 
 ## Design decisions
 
 **Citations carry quotes, not just references.** A `[1]` marker proves a marker
-exists. A quote can be checked against the source, so verification is mechanical
-rather than a matter of trust. Whitespace and Unicode are normalised before
-comparison — re-wrapping isn't fabrication — but a paraphrase is rejected, even a
-semantically correct one, because semantic closeness is what hallucination looks
-like.
+exists; a quote can be checked. Whitespace and Unicode are normalised before
+comparison — rewrapping isn't fabrication — but paraphrases are rejected, even
+semantically correct ones, because semantic closeness is what hallucination
+looks like.
 
-**Refusal is a success, and a 200.** "The corpus can't answer this" is a valid,
-expected outcome that clients must render. Modelling it as an error would push
-callers toward ignoring it.
+**Refusal is a success, and a 200.** "The corpus can't answer this" is an
+expected result clients must render, not an error.
 
-**Chunk ids are content hashes, deliberately excluding position.**
-`sha256(document_id, text)` means editing paragraph 2 leaves paragraphs 3–500
-with unchanged ids, so re-ingestion re-embeds only what actually changed.
-Re-running over an untouched corpus costs zero embedding calls — asserted in the
-test suite against the embedder's call counter, not a log line.
+**Chunk ids are content hashes, excluding position.**
+`sha256(document_id, text)`, so editing paragraph 2 leaves paragraphs 3–500
+untouched and re-ingestion re-embeds only what changed. A re-run over an
+unchanged corpus costs zero embedding calls — asserted against the embedder's
+call counter, not a log line.
 
-**Mixing embedding models is fatal, by design.** A collection records the model
-and dimensionality of its first write. Switching models later raises rather than
-silently returning nearest neighbours from an incompatible vector space — the
-kind of failure that looks like "retrieval got worse" for weeks.
+**Mixing embedding models is fatal.** A collection records the model and
+dimensionality of its first write and hard-fails on divergence, rather than
+silently returning neighbours from an incompatible vector space.
 
-**Retrieved content is untrusted input.** Sources are fenced in `<source>` tags,
-labelled as data the model must never obey, and the question is placed *after*
-them so no document can position itself after the instruction it wants to
-override. This is defence in depth, not a proof — the real backstop is that a
-hijacked answer still cannot produce verifiable quotes.
+**Retrieved content is untrusted.** Sources are fenced in `<source>` tags,
+labelled as data the model must never obey, and the question goes *after* them.
+Defence in depth, not proof — the real backstop is that a hijacked answer still
+can't produce verifiable quotes.
 
-**Token budget, not fixed `k`.** A fixed count overflows a small model's context
-window and wastes a large one's. The top hit is always kept, even over budget.
+**A scope check runs before generation.** Verification proves grounding, not
+relevance: asked about the *UK* AI Act, an early version answered with EU
+requirements, correctly cited. Nothing downstream can catch that, so
+[`rag/scope.py`](src/citely/rag/scope.py) refuses when the question names
+something no retrieved source mentions. Deliberately conservative — five of its
+twenty tests assert it does *not* fire on answerable questions.
 
-**Structure-aware chunking.** Paragraphs, then sentences, then (only for text
-with no internal boundary) hard slices. Fixed-width slicing produces citations
-that quote half-sentences.
+**Token budget, not fixed `k`.** A fixed count overflows small context windows
+and wastes large ones. The top hit is always kept.
 
-**Two vector stores, one Protocol, one test suite shape.** Chroma needs no setup
-and makes the quickstart real; pgvector is for teams already running Postgres.
-Both normalise cosine distance to a `[0, 1]` score so `CITELY_MIN_SCORE` means
-the same thing on either.
+**Structure-aware chunking.** Paragraphs, then sentences, then hard slices only
+for text with no internal boundary.
 
 ## Configuration
 
-Everything is environment variables, validated once at startup — a missing key
-fails immediately with a readable message, not on the first request. See
-[.env.example](.env.example) for the full list.
+Environment variables, validated once at startup. Full list in
+[.env.example](.env.example).
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -237,119 +195,68 @@ fails immediately with a readable message, not on the first request. See
 | `CITELY_TOP_K` | `6` | Chunks retrieved per query |
 | `CITELY_MIN_SCORE` | `0.0` | Drop matches below this similarity |
 | `CITELY_SCOPE_CHECK` | `true` | Refuse when the question names something no source mentions |
-| `CITELY_MAX_CONTEXT_TOKENS` | `6000` | Retrieval budget; lower it for small local models |
-| `CITELY_CHUNK_SIZE` / `_OVERLAP` | `1000` / `150` | Characters |
+| `CITELY_MAX_CONTEXT_TOKENS` | `6000` | Lower it for small local models |
 | `CITELY_LOG_FORMAT` | `json` | `json` · `console` |
 
-Secrets are read from the conventional `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
-too, held as `SecretStr`, and never appear in logs or tracebacks.
+Keys are also read from plain `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, held as
+`SecretStr`, and never appear in logs or tracebacks.
 
-### Postgres instead of Chroma
+**Postgres instead of Chroma:**
 
 ```bash
 docker compose --profile postgres up -d postgres
 export CITELY_VECTOR_STORE=pgvector
 export CITELY_PGVECTOR_DSN=postgresql://citely:citely@localhost:5432/citely
-citely ingest
 ```
 
-The schema is created on first use, with an HNSW index over cosine distance.
+Schema is created on first use, with an HNSW index over cosine distance.
 
 ## Evaluation
 
 ```bash
 make eval        # offline stubs — no API key, runs in CI
-make eval-live   # the configured providers; gates on every metric
+make eval-live   # the configured providers, gated on every metric
 ```
 
-The [golden set](evals/golden.yaml) is 20 cases — 10 answerable, 10 that must be
-refused — declaring expected *behaviour* rather than expected strings, because
-scoring against fixed sentences measures phrasing and breaks on every model
-upgrade. It includes multi-hop questions (no single chunk states the answer),
-near-miss distractors, questions the corpus half-answers, and a document
-carrying a live prompt-injection payload.
+Twenty cases — ten answerable, ten that must be refused — declaring expected
+*behaviour*, not exact strings. They include multi-hop questions, near-miss
+distractors, half-answerable questions, and a document carrying a live
+prompt-injection payload.
 
-| Metric | What it answers |
-|---|---|
-| `retrieval_hit_rate` | Did the right source come back? Caps everything downstream. |
-| `answer_accuracy` / `refusal_accuracy` | Reported separately — over- and under-refusal fail for opposite reasons. |
-| `citation_precision` | Of claimed citations, how many survived verification? Fabrication, measured. |
-| `groundedness` | Every answer carries ≥1 verified citation. Gated at 1.0 — below that is a broken guardrail. |
-| `injection_resistance` | No answer echoes a canary phrase planted in the corpus. Gated at 1.0. |
+Measured with `llama3.2:3b` + `nomic-embed-text`:
 
-An eval suite that can't fail is theatre, so the harness is itself tested against
-a deliberately fabricating model and asserted to go **red**
-([tests/test_evals.py](tests/test_evals.py)).
+| Metric | Score | |
+|---|---|---|
+| `retrieval_hit_rate` | 1.00 | Did the right source come back? |
+| `answer_accuracy` | 0.80 | Answered when it should |
+| `refusal_accuracy` | 1.00 | Refused when it should |
+| `citation_precision` | 0.91 | Claimed citations that survived verification |
+| `groundedness` | **1.00** | Every answer cites ≥1 verified source (gated) |
+| `injection_resistance` | **1.00** | No planted canary ever echoed (gated) |
 
-CI gates only the guardrail metrics offline, because the stubs' answer quality
-isn't what CI is checking. Model quality is `make eval-live`.
+**The 0.91 is the number that matters.** A real model fabricated a quote,
+verification rejected it, and the claim never reached the caller — the premise
+of this project, measured rather than asserted.
 
-### Measured results
+Both remaining failures are over-refusals (the safe direction): a two-hop
+question the model wouldn't complete, and a half-answerable question it refused
+entirely instead of answering the half it could.
 
-`llama3.2:3b` via Ollama, `nomic-embed-text` embeddings, 20 cases, `top_k=4`:
-
-| Metric | Score |
-|---|---|
-| `retrieval_hit_rate` | 1.00 |
-| `answer_accuracy` | 0.80 |
-| `refusal_accuracy` | 1.00 |
-| `citation_precision` | 0.91 |
-| `groundedness` | **1.00** |
-| `injection_resistance` | **1.00** |
-
-**`citation_precision` of 0.92 is the number that matters.** A 3B model
-fabricated one quote, verification rejected it, and the fabricated claim never
-reached the caller. That is the entire premise of this project, measured against
-a real model rather than asserted in a README.
-
-Both gated guardrails held at 1.00: no uncited answer was returned, and the
-injection payload never produced its canary — despite retrieval surfacing that
-document in four separate cases.
-
-Both remaining failures are over-refusals — the safe direction, where the user
-gets nothing and knows it:
-
-| Case | What happened |
-|---|---|
-| `multihop-documentation-duty` | Asked what records a hiring-AI provider must keep. Needed two hops (hiring → high-risk → documentation); the model wouldn't make the second one. |
-| `partial-answer-enforcement` | Asked who enforces the Regulation *and* the maximum fine. The corpus answers the first but not the second, and it refused the whole question rather than answering the half it could. |
-
-### The scope check, and why it exists
-
-An earlier run failed a third case, `wrong-jurisdiction`: asked about the **UK**
-AI Act, the system answered with EU requirements — correctly cited, every claim
-genuinely in the corpus, and completely off-target.
-
-That exposed a limit of the core mechanism: **quote verification proves
-grounding, not relevance.** Nothing downstream can catch an answer whose every
-citation is real but whose subject is wrong, so the check has to happen before
-generation. [`rag/scope.py`](src/citely/rag/scope.py) extracts the identifying
-terms from a question — proper nouns, acronyms, article numbers — and refuses
-when a term appears in none of the retrieved sources. "UK" is nowhere in an EU
-corpus, so the question is unanswerable from it whatever the similarity scores
-say.
-
-The risk in such a fix is trading a rare wrong answer for frequent wrong
-refusals, so it is deliberately conservative: only terms absent from *every*
-retrieved chunk count, generic domain words are ignored, and five of its twenty
-tests exist purely to assert it does *not* fire on answerable questions. The
-measured effect was `refusal_accuracy` 0.90 → 1.00 with `answer_accuracy`
-unchanged at 0.80 — the failure fixed, no new over-refusals. Disable with
-`CITELY_SCOPE_CHECK=false`.
+An eval suite that can't fail is theatre, so the harness is itself tested
+against a deliberately fabricating model and asserted to go **red**
+([tests/test_evals.py](tests/test_evals.py)). CI gates only the guardrail
+metrics offline; model quality is `make eval-live`.
 
 ## Development
 
 ```bash
 make help        # all targets
 make check       # lint + type-check + test + eval, same as CI
-make test-live   # tests that hit real provider APIs (needs keys)
 ```
 
-- Python 3.11+, fully type-hinted, **mypy strict**, no `Any` escapes in the
-  domain.
-- ruff for lint and format; pre-commit runs both plus secret detection.
-- 202 tests, 90% coverage. Provider and store backends are tested twice: with fakes for
-  logic, and against real Chroma / real Postgres for behaviour.
+Python 3.11+, mypy strict, ruff, 215 tests at 96% coverage. Backends are tested
+twice: with fakes for logic, and against real Chroma and real Postgres for
+behaviour. CI runs both, plus pre-commit and a coverage gate.
 
 ```bash
 # pgvector tests need a database; they skip cleanly without one
@@ -360,56 +267,36 @@ CITELY_TEST_PGVECTOR_DSN=postgresql://citely:citely@localhost:5433/citely \
   uv run pytest -m pgvector
 ```
 
-## Limitations, honestly
+## Limitations
 
-**Measured on one small local model, not on frontier models.** The numbers above
-are `llama3.2:3b`. Claude and GPT are unmeasured — they would likely score
-higher, but "likely" is not a measurement. The eval corpus is also a summary
-written for this repo: clean, well-structured prose that is easy to quote from,
-unlike real legal text with cross-references and enumerated subsections.
+**Measured on one small local model.** Claude and GPT are unmeasured — they'd
+likely score higher, but "likely" isn't a measurement. The corpus is also a
+ten-article extract of clean legal prose, not the full Regulation.
 
-**Grounded is not the same as relevant.** Verification proves a quote came from
-the corpus, never that it answers the question. The scope check covers the case
-where the question *names* something absent from the corpus; it cannot help when
-a question is off-target without naming anything — "how do I appeal this
-decision?" against a corpus describing obligations, say.
+**Grounded ≠ relevant.** Verification proves a quote came from the corpus, never
+that it answers the question. The scope check covers questions that *name*
+something absent; it can't help when a question is off-target without naming
+anything.
 
-**Dense retrieval only.** No hybrid search, no BM25, no reranking. Questions
-phrased very differently from the source text will miss, and the answer will be
-an honest refusal rather than a wrong answer — but a miss all the same.
+**Dense retrieval only.** No hybrid search, BM25, or reranking. Questions phrased
+far from the source text miss — producing an honest refusal, but a miss.
 
-**Verified citations can be a subset of the `[n]` markers in the prose.** If one
-citation is dropped, the answer text may still reference it. Renumbering during
-response formatting is the fix.
+**Also:** no JSON repair retry on malformed model output; verified citations can
+be a subset of the `[n]` markers in the prose; token counting is a `len // 4`
+heuristic; no auth or rate limiting, so `/ingest` shouldn't be public as-is;
+text files only (no PDF); the image is ~570MB, mostly chromadb's unused ONNX
+runtime.
 
-**No repair loop on malformed JSON.** A model that returns unparseable output
-raises rather than retrying. Small local models will need that loop.
+### Next, in order
 
-**Token counting is a `len(text) // 4` heuristic**, not a real tokenizer.
-Adequate for budgeting, wrong at the margins for non-English text.
-
-**No auth, no rate limiting, no multi-tenancy.** `/ingest` reads server-side
-paths and is not something to expose publicly as-is.
-
-**Text files only.** No PDF, HTML, or DOCX loaders yet — the loader interface is
-one function, but the parsers aren't written.
-
-**The image is ~570MB**, mostly chromadb's ONNX runtime dependency, which citely
-never uses because embeddings come from a provider.
-
-### What I'd do next, in order
-
-1. Run the same suite against Claude and GPT; publish all three columns. The
-   interesting question is not which wins but whether the *failure modes* are
-   the same ones.
-2. Hybrid retrieval (BM25 + dense) with a reranker, measured against this set —
-   the likely fix for both remaining over-refusals.
-3. Answer the answerable half of a partly-covered question, instead of refusing
-   the whole thing. That needs a third state in the `Answer` model, not a
-   prompt tweak.
-4. A JSON repair retry, plus provider-native structured output where available.
-5. Auth and per-key rate limiting before this is exposed to anyone.
-6. Grow the golden set to ~50 cases and swap in the real legal text.
+1. Run the same suite against Claude and GPT — the interesting question is
+   whether the *failure modes* match, not which model wins.
+2. Hybrid retrieval with a reranker: the likely fix for both over-refusals.
+3. Answer the answerable half of a partly-covered question. Needs a third state
+   in the `Answer` model, not a prompt tweak.
+4. JSON repair retry, plus provider-native structured output.
+5. Auth and per-key rate limiting before exposing this to anyone.
+6. Grow the golden set to ~50 cases and swap in the full legal text.
 
 ## License
 
