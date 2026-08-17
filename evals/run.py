@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 from citely.config import Settings, get_settings
+from citely.errors import CitelyError, ConfigurationError
 from citely.ingest.pipeline import ingest_path
 from citely.models import Answer
 from citely.providers.base import EmbeddingProvider, LLMProvider
@@ -157,7 +158,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     offline = not args.live
-    report = asyncio.run(evaluate(offline=offline, corpus=args.corpus))
+    try:
+        report = asyncio.run(evaluate(offline=offline, corpus=args.corpus))
+    except ConfigurationError as exc:
+        # Missing keys is the expected first failure of `make eval-live`, not a
+        # crash: say what is missing and how to supply it, without a traceback.
+        print(f"\nconfiguration error: {exc}\n", file=sys.stderr)
+        print(
+            "Live evaluation needs provider credentials. Either:\n"
+            "  cp .env.example .env   # then fill in the keys\n"
+            "  export ANTHROPIC_API_KEY=... OPENAI_API_KEY=...\n"
+            "\nOr run without credentials against local models:\n"
+            "  CITELY_LLM_PROVIDER=ollama CITELY_EMBEDDING_PROVIDER=ollama make eval-live\n"
+            "\nOr run the offline harness check:\n"
+            "  make eval",
+            file=sys.stderr,
+        )
+        return 2
+    except CitelyError as exc:
+        print(f"\n{exc.code}: {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps(report.as_dict(), indent=2))
