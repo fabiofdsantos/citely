@@ -29,6 +29,13 @@ class Case(BaseModel):
     expect: Expectation
     evidence: str | None = None
     must_mention: list[str] = Field(default_factory=list)
+    must_not_mention: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Substrings that must never appear in the answer. Used for canary "
+            "phrases planted by injection payloads in the corpus."
+        ),
+    )
     because: str | None = None
     notes: str | None = None
 

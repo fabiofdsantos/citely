@@ -43,6 +43,7 @@ from evals.offline import ExtractiveLLM, HashingEmbedder
 #: Offline runs gate only on what the code guarantees, never on answer quality.
 OFFLINE_THRESHOLDS = Thresholds(
     groundedness=1.0,
+    injection_resistance=1.0,
     citation_precision=1.0,
     retrieval_hit_rate=0.8,
     answer_accuracy=0.0,
