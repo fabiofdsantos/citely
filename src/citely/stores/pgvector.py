@@ -8,6 +8,9 @@ Implementation notes:
 
 * Raw SQL over psycopg3's async pool. An ORM would add a dependency, a
   migration tool, and a mapping layer for four queries.
+* Table names are composed with ``psycopg.sql.Identifier``, never interpolated.
+  Identifiers cannot be bound as parameters, and composition is the only way to
+  make that safe rather than merely careful.
 * Vectors are sent as pgvector's text literal (``'[1,2,3]'``) and cast, which
   avoids depending on the ``pgvector`` Python package for binary adaptation.
 * The schema is created on first use. For a single-table store this is simpler
@@ -21,7 +24,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, sql
+from psycopg.errors import UndefinedTable
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -89,6 +93,7 @@ class PgVectorStore:
         # The collection name becomes the table name, so it is validated rather
         # than interpolated blindly: table names cannot be bound as parameters.
         self._table = _safe_identifier(settings.collection_name)
+        self._identifier = sql.Identifier(self._table)
         self._pool: AsyncConnectionPool | None = None
         self._ready = False
 
@@ -118,8 +123,8 @@ class PgVectorStore:
                 await self._guard_embedding_space(conn, model, dimensions)
 
                 await conn.cursor().executemany(
-                    f"""
-                    INSERT INTO {self._table} (
+                    sql.SQL("""
+                    INSERT INTO {table} (
                         chunk_id, document_id, source_uri, title, chunk_index,
                         content, metadata, embedding, embedding_model
                     )
@@ -129,7 +134,7 @@ class PgVectorStore:
                         metadata = EXCLUDED.metadata,
                         embedding = EXCLUDED.embedding,
                         embedding_model = EXCLUDED.embedding_model
-                    """,
+                    """).format(table=self._identifier),
                     [
                         (
                             c.chunk.chunk_id,
@@ -157,7 +162,7 @@ class PgVectorStore:
     ) -> None:
         """Refuse to mix embedding models, exactly as the Chroma store does."""
         cursor = await conn.execute(
-            f"SELECT embedding_model FROM {self._table} LIMIT 1"  # noqa: S608 - validated identifier
+            sql.SQL("SELECT embedding_model FROM {table} LIMIT 1").format(table=self._identifier)
         )
         row = await cursor.fetchone()
         if row and row[0] != model:
@@ -173,7 +178,9 @@ class PgVectorStore:
         try:
             async with pool.connection() as conn:
                 cursor = await conn.execute(
-                    f"DELETE FROM {self._table} WHERE chunk_id = ANY(%s)",  # noqa: S608
+                    sql.SQL("DELETE FROM {table} WHERE chunk_id = ANY(%s)").format(
+                        table=self._identifier
+                    ),
                     (list(chunk_ids),),
                 )
                 return cursor.rowcount
@@ -185,7 +192,9 @@ class PgVectorStore:
         try:
             async with pool.connection() as conn:
                 cursor = await conn.execute(
-                    f"DELETE FROM {self._table} WHERE document_id = %s",  # noqa: S608
+                    sql.SQL("DELETE FROM {table} WHERE document_id = %s").format(
+                        table=self._identifier
+                    ),
                     (document_id,),
                 )
                 return cursor.rowcount
@@ -198,15 +207,19 @@ class PgVectorStore:
         try:
             async with pool.connection() as conn:
                 cursor = await conn.execute(
-                    f"SELECT chunk_id FROM {self._table} WHERE document_id = %s",  # noqa: S608
+                    sql.SQL("SELECT chunk_id FROM {table} WHERE document_id = %s").format(
+                        table=self._identifier
+                    ),
                     (document_id,),
                 )
                 return {row[0] for row in await cursor.fetchall()}
+        except UndefinedTable:
+            # Nothing has been ingested yet: a legitimate first-run state.
+            # Matched by SQLSTATE rather than by message text — a substring
+            # check for "does not exist" also swallows undefined *columns* and
+            # *functions*, turning a real query bug into a silent empty result.
+            return set()
         except Exception as exc:
-            # A missing table means nothing has been ingested yet, which is a
-            # legitimate state on a first run rather than a failure.
-            if "does not exist" in str(exc):
-                return set()
             raise StoreError(f"pgvector lookup failed: {exc}") from exc
 
     async def search(
@@ -217,28 +230,33 @@ class PgVectorStore:
         filters: Mapping[str, str] | None = None,
     ) -> list[ScoredChunk]:
         pool = await self._connection_pool()
-        where, params = "", [_to_vector_literal(embedding)]
+        params: list[str] = [_to_vector_literal(embedding)]
+        where = sql.SQL("")
         if filters:
-            where = " WHERE metadata @> %s::jsonb"
+            where = sql.SQL(" WHERE metadata @> %s::jsonb")
             params.append(json.dumps(dict(filters)))
 
         try:
             async with pool.connection() as conn:
                 cursor = conn.cursor(row_factory=dict_row)
                 await cursor.execute(
-                    f"""
+                    sql.SQL("""
                     SELECT chunk_id, document_id, source_uri, title, chunk_index,
                            content, metadata, embedding <=> %s::vector AS distance
-                    FROM {self._table}{where}
+                    FROM {table}{where}
                     ORDER BY distance
-                    LIMIT {int(k)}
-                    """,
+                    LIMIT {limit}
+                    """).format(
+                        table=self._identifier,
+                        where=where,
+                        limit=sql.Literal(int(k)),
+                    ),
                     params,
                 )
                 rows = await cursor.fetchall()
+        except UndefinedTable:
+            return []
         except Exception as exc:
-            if "does not exist" in str(exc):
-                return []
             raise StoreError(f"pgvector query failed: {exc}") from exc
 
         return [
@@ -261,19 +279,18 @@ class PgVectorStore:
         try:
             async with pool.connection() as conn:
                 cursor = await conn.execute(
-                    f"""
+                    sql.SQL("""
                     SELECT COUNT(*) AS n,
                            MIN(embedding_model) AS model,
                            MIN(vector_dims(embedding)) AS dims
-                    FROM {self._table}
-                    """
+                    FROM {table}
+                    """).format(table=self._identifier)
                 )
                 row = await cursor.fetchone()
+        except UndefinedTable:
+            row = (0, None, None)
         except Exception as exc:
-            if "does not exist" in str(exc):
-                row = (0, None, None)
-            else:
-                raise StoreError(f"pgvector health check failed: {exc}") from exc
+            raise StoreError(f"pgvector health check failed: {exc}") from exc
 
         count, model, dims = row if row else (0, None, None)
         return StoreHealth(
@@ -291,12 +308,12 @@ class PgVectorStore:
 
 
 def _safe_identifier(name: str) -> str:
-    """Validate a name used as a SQL identifier.
+    """Validate a name before it becomes a SQL identifier.
 
-    Table names cannot be passed as bound parameters, so the only safe options
-    are a strict allowlist or psycopg's ``sql.Identifier``. An allowlist is used
-    here because the value comes from configuration, and a startup error is a
-    better outcome than a quoted-but-bizarre table name.
+    Composition with ``sql.Identifier`` already makes the value safe to embed.
+    This check is belt-and-braces for readability: a configured collection name
+    that would produce a quoted, bizarre table name is far more likely to be a
+    typo than an intention, and a startup error beats a mystery table.
     """
     if not name.replace("_", "").isalnum() or name[0].isdigit():
         raise StoreError(

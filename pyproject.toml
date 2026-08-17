@@ -91,6 +91,12 @@ ignore = [
     "S101",    # asserts are the point in tests
     "ANN201",  # test functions need no return annotation
 ]
+# Every query here is built with psycopg's `sql.SQL(...).format(sql.Identifier(...))`
+# composition, which quotes identifiers safely; values are always bound
+# parameters. S608's heuristic cannot distinguish composition from f-string
+# interpolation, so it fires on correct code. The invariant is enforced by
+# construction and by `_safe_identifier`, and tested in test_pgvector_store.py.
+"src/citely/stores/pgvector.py" = ["S608"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "parents"  # allow `.sibling`, ban `..parent`

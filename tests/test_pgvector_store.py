@@ -193,3 +193,21 @@ def test_unsafe_collection_names_are_rejected() -> None:
                 collection_name="chunks; DROP TABLE users--",
             )
         )
+
+
+async def test_real_query_errors_are_not_swallowed(store: PgVectorStore) -> None:
+    """A genuine SQL error must surface, not masquerade as "no results".
+
+    The handler used to match on the substring "does not exist", which also
+    catches undefined *columns* and *functions* — so a broken query returned an
+    empty list and looked exactly like an empty corpus. Matching on SQLSTATE
+    (UndefinedTable) keeps the first-run case working without hiding bugs.
+    """
+    await store.upsert([embedded("text")])
+
+    pool = await store._connection_pool()
+    async with pool.connection() as conn:
+        await conn.execute("ALTER TABLE citely_test_pgvector DROP COLUMN content")
+
+    with pytest.raises(StoreError, match="pgvector query failed"):
+        await store.search([1.0, 0.0, 0.0], k=1)
