@@ -110,14 +110,18 @@ _NOT_IDENTIFYING = frozenset(
 )
 
 
-def identifying_terms(question: str) -> set[str]:
-    """Extract the words that determine which corpus could answer a question."""
-    terms: set[str] = set()
+def identifying_terms(question: str) -> dict[str, str]:
+    """Extract the words that determine which corpus could answer a question.
+
+    Returns a mapping of comparison key (casefolded) to the surface form as the
+    user wrote it, so a refusal can say "UK" rather than "uk".
+    """
+    terms: dict[str, str] = {}
 
     for match in _ACRONYM.finditer(question):
         term = match.group()
         if term.casefold() not in _NOT_IDENTIFYING:
-            terms.add(term.casefold())
+            terms[term.casefold()] = term
 
     for match in _CAPITALISED.finditer(question):
         term = match.group()
@@ -126,28 +130,33 @@ def identifying_terms(question: str) -> set[str]:
         if match.start() == 0:
             continue
         if term.casefold() not in _NOT_IDENTIFYING:
-            terms.add(term.casefold())
+            terms.setdefault(term.casefold(), term)
 
     # "Article 17" is a different thing from "Article 5"; the number is the
     # identity. Bare numbers are ignored — "the 3 obligations" identifies
     # nothing and would cause false refusals.
     for match in _NUMBERED_REFERENCE.finditer(question):
-        terms.add(match.group(1))
+        number = match.group(1)
+        terms.setdefault(number, f"{match.group().split()[0]} {number}")
 
     return terms
 
 
 def out_of_scope_terms(question: str, sources: Sequence[ScoredChunk]) -> set[str]:
-    """Return identifying terms from the question that no source mentions."""
+    """Return the question's identifying terms that no source mentions.
+
+    Terms are returned in the surface form the user wrote them in, for use in
+    the refusal message.
+    """
     if not sources:
         return set()
 
     haystack = " ".join(scored.chunk.text for scored in sources).casefold()
     # Word-boundary matching, so "uk" does not match inside "Denmark".
     return {
-        term
-        for term in identifying_terms(question)
-        if not re.search(rf"\b{re.escape(term)}\b", haystack)
+        surface
+        for key, surface in identifying_terms(question).items()
+        if not re.search(rf"\b{re.escape(key)}\b", haystack)
     }
 
 

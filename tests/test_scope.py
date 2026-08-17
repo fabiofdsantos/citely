@@ -32,10 +32,10 @@ def sources(text: str = CORPUS) -> list[ScoredChunk]:
 
 class TestTermExtraction:
     def test_finds_proper_nouns(self) -> None:
-        assert "brussels" in identifying_terms("Does the Brussels office apply?")
+        assert identifying_terms("Does the Brussels office apply?")["brussels"] == "Brussels"
 
     def test_finds_acronyms(self) -> None:
-        assert "gdpr" in identifying_terms("What does GDPR require?")
+        assert identifying_terms("What does GDPR require?")["gdpr"] == "GDPR"
 
     def test_ignores_the_first_word(self) -> None:
         """Capitalised by grammar, so it carries no identity signal."""
@@ -43,14 +43,14 @@ class TestTermExtraction:
 
     def test_ignores_generic_domain_words(self) -> None:
         terms = identifying_terms("What obligations apply to AI Systems under the Regulation?")
-        assert terms == set()
+        assert terms == {}
 
     def test_captures_article_numbers(self) -> None:
         assert "17" in identifying_terms("What does Article 17 say?")
 
     def test_ignores_bare_numbers(self) -> None:
         """ "the 3 obligations" identifies nothing and must not trigger a refusal."""
-        assert identifying_terms("What are the 3 obligations?") == set()
+        assert identifying_terms("What are the 3 obligations?") == {}
 
 
 class TestScopeDecision:
@@ -81,11 +81,11 @@ class TestScopeDecision:
     def test_reason_names_the_missing_term(self) -> None:
         reason = scope_refusal_reason("What does the UK AI Act require?", sources())
         assert reason is not None
-        assert "uk" in reason
+        assert "UK" in reason, "the refusal should echo the term as the user wrote it"
 
     def test_word_boundaries_are_respected(self) -> None:
         """ "uk" must not be considered present because "Denmark" contains it."""
-        assert out_of_scope_terms("Does the UK apply?", sources("Denmark and Sweden")) == {"uk"}
+        assert out_of_scope_terms("Does the UK apply?", sources("Denmark and Sweden")) == {"UK"}
 
 
 @pytest.mark.parametrize(
