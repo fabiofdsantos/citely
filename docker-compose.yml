@@ -1,0 +1,62 @@
+# Default: `docker compose up` runs citely with Chroma on disk. Only API keys
+# are needed. Optional profiles add the pieces you may not want:
+#
+#   docker compose --profile local up      # + Ollama, no API keys at all
+#   docker compose --profile postgres up   # + Postgres/pgvector
+services:
+  api:
+    build: .
+    ports:
+      - "${CITELY_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CITELY_CHROMA_PATH: /data/chroma
+      CITELY_CORPUS_PATH: /data/corpus
+      CITELY_LOG_FORMAT: json
+    volumes:
+      # The corpus is mounted read-only: the service indexes documents, it has
+      # no business modifying them.
+      - ./data/corpus:/data/corpus:ro
+      - citely-index:/data/chroma
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Local models. Not in the default stack: the first run pulls several GB, and
+  # that is a poor first impression for someone who just wants the quickstart.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [local]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Postgres + pgvector, for the documented production path.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: [postgres]
+    environment:
+      POSTGRES_USER: citely
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-citely}
+      POSTGRES_DB: citely
+    ports:
+      - "5432:5432"
+    volumes:
+      - citely-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U citely -d citely"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  citely-index:
+  citely-postgres:
+  ollama-models:
