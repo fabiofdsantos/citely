@@ -18,9 +18,9 @@ def build_vector_store(settings: Settings) -> VectorStore:
             from citely.stores.chroma import ChromaVectorStore
 
             return ChromaVectorStore(settings)
-        case "pgvector":  # pragma: no cover - implemented in a later step
-            raise ConfigurationError(
-                "the pgvector store is not implemented yet; use CITELY_VECTOR_STORE=chroma"
-            )
+        case "pgvector":
+            from citely.stores.pgvector import PgVectorStore
+
+            return PgVectorStore(settings)
         case unknown:  # pragma: no cover - Literal typing makes this unreachable
             raise ConfigurationError(f"unknown vector store: {unknown!r}")

@@ -26,6 +26,7 @@ dependencies = [
     "anthropic>=0.40",
     "chromadb>=0.5",
     "pyyaml>=6.0.3",
+    "psycopg[binary,pool]>=3.2",
 ]
 
 [project.urls]
@@ -135,6 +136,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "live: hits real provider APIs; requires keys; deselected by default",
+    "pgvector: needs a Postgres with pgvector; set CITELY_TEST_PGVECTOR_DSN to run",
 ]
 
 [tool.coverage.run]
