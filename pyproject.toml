@@ -5,7 +5,7 @@ description = "Retrieval-Augmented Generation as a Service, with grounded, cited
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Fabio Santos", email = "ffsantos92@gmail.com" }]
+authors = [{ name = "Fábio Santos", email = "ffsantos92@gmail.com" }]
 keywords = ["rag", "llm", "retrieval", "citations", "fastapi"]
 classifiers = [
     "Development Status :: 3 - Alpha",
