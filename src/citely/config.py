@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, Literal, Self
 
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from citely.errors import ConfigurationError
@@ -129,6 +129,22 @@ class Settings(BaseSettings):
     # -- Observability -----------------------------------------------------
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "json"
+
+    # -- Normalisation -----------------------------------------------------
+    @field_validator("openai_api_key", "anthropic_api_key", "pgvector_dsn", mode="before")
+    @classmethod
+    def _empty_secret_is_absent(cls, value: object) -> object:
+        """Treat a blank credential as missing rather than as a value.
+
+        ``.env.example`` ships keys as ``OPENAI_API_KEY=`` for the user to fill
+        in. Without this, copying that file and filling in only one provider's
+        key leaves the other as an empty string — which passes the "is it set?"
+        check and then fails deep inside a provider SDK at startup, long after
+        the configuration error could have been reported clearly.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     # -- Derived values ----------------------------------------------------
     @property

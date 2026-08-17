@@ -74,3 +74,30 @@ def test_get_settings_raises_configuration_error() -> None:
     """Callers catch one exception type; pydantic's ValidationError does not leak."""
     with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
         get_settings()
+
+
+def test_blank_credentials_are_treated_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Copying .env.example leaves keys as empty strings.
+
+    Without this, an unfilled key passes validation and then fails inside the
+    provider SDK at startup, which is where a stranger's first `docker compose
+    up` used to die.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "   ")
+
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(llm_provider="anthropic")
+
+    message = str(excinfo.value)
+    assert "ANTHROPIC_API_KEY" in message
+    assert "OPENAI_API_KEY" in message
+
+
+def test_blank_pgvector_dsn_is_treated_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("CITELY_PGVECTOR_DSN", "")
+
+    with pytest.raises(ValidationError, match="PGVECTOR_DSN"):
+        Settings(vector_store="pgvector")
