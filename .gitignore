@@ -22,8 +22,6 @@ htmlcov/
 
 # Local state
 data/chroma/
-data/corpus/*
-!data/corpus/.gitkeep
 evals/results/
 
 # Editors / OS
