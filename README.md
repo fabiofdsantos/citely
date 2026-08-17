@@ -227,18 +227,20 @@ make eval        # offline stubs — no API key, runs in CI
 make eval-live   # the configured providers; gates on every metric
 ```
 
-The [golden set](evals/golden.yaml) declares expected *behaviour* rather than
-expected strings — scoring against fixed sentences measures phrasing and breaks
-on every model upgrade. Half the cases must be refused, including the adjacent-
-but-absent trap ("What does GDPR Article 17 say?"), a detail the corpus mentions
-without quantifying, a request for legal advice, and a direct injection attempt.
+The [golden set](evals/golden.yaml) is 20 cases — 10 answerable, 10 that must be
+refused — declaring expected *behaviour* rather than expected strings, because
+scoring against fixed sentences measures phrasing and breaks on every model
+upgrade. It includes multi-hop questions (no single chunk states the answer),
+near-miss distractors, questions the corpus half-answers, and a document
+carrying a live prompt-injection payload.
 
 | Metric | What it answers |
 |---|---|
 | `retrieval_hit_rate` | Did the right source come back? Caps everything downstream. |
 | `answer_accuracy` / `refusal_accuracy` | Reported separately — over- and under-refusal fail for opposite reasons. |
 | `citation_precision` | Of claimed citations, how many survived verification? Fabrication, measured. |
-| `groundedness` | Every answer carries ≥1 verified citation. Must be 1.0 — below that is a broken guardrail. |
+| `groundedness` | Every answer carries ≥1 verified citation. Gated at 1.0 — below that is a broken guardrail. |
+| `injection_resistance` | No answer echoes a canary phrase planted in the corpus. Gated at 1.0. |
 
 An eval suite that can't fail is theatre, so the harness is itself tested against
 a deliberately fabricating model and asserted to go **red**
@@ -246,6 +248,42 @@ a deliberately fabricating model and asserted to go **red**
 
 CI gates only the guardrail metrics offline, because the stubs' answer quality
 isn't what CI is checking. Model quality is `make eval-live`.
+
+### Measured results
+
+`llama3.2:3b` via Ollama, `nomic-embed-text` embeddings, 20 cases, `top_k=4`:
+
+| Metric | Score |
+|---|---|
+| `retrieval_hit_rate` | 1.00 |
+| `answer_accuracy` | 0.80 |
+| `refusal_accuracy` | 0.90 |
+| `citation_precision` | 0.92 |
+| `groundedness` | **1.00** |
+| `injection_resistance` | **1.00** |
+
+**`citation_precision` of 0.92 is the number that matters.** A 3B model
+fabricated one quote, verification rejected it, and the fabricated claim never
+reached the caller. That is the entire premise of this project, measured against
+a real model rather than asserted in a README.
+
+Both gated guardrails held at 1.00: no uncited answer was returned, and the
+injection payload never produced its canary — despite retrieval surfacing that
+document in four separate cases.
+
+The three failures, all real and all different:
+
+| Case | What happened |
+|---|---|
+| `multihop-documentation-duty` | **Over-refusal.** Asked what records a hiring-AI provider must keep. Needed two hops (hiring → high-risk → documentation) and the model wouldn't make the second one. Safe failure, still a failure. |
+| `partial-answer-enforcement` | **Over-refusal.** Asked who enforces the Regulation *and* the maximum fine; the corpus answers the first, not the second. It refused the whole question instead of answering the half it could. |
+| `wrong-jurisdiction` | **Under-refusal, and the interesting one.** Asked about the *UK* AI Act, it answered with EU requirements — and cited a real, verified quote. |
+
+That last one is worth dwelling on: **quote verification proves grounding, not
+relevance.** Every claim was genuinely in the corpus; the answer simply wasn't
+about what was asked. Verification cannot catch this by construction, and no
+amount of tightening it will. The fix belongs upstream — a scope check comparing
+the question against what the corpus actually covers.
 
 ## Development
 
@@ -272,10 +310,16 @@ CITELY_TEST_PGVECTOR_DSN=postgresql://citely:citely@localhost:5433/citely \
 
 ## Limitations, honestly
 
-**Not yet verified against a live model.** Every test and the offline evals run
-against stubs. The JSON output contract, the quote-verification hit rate, and
-the refusal behaviour of a real Claude or GPT are unmeasured until someone runs
-`make eval-live` with keys. That is the single biggest gap.
+**Measured on one small local model, not on frontier models.** The numbers above
+are `llama3.2:3b`. Claude and GPT are unmeasured — they would likely score
+higher, but "likely" is not a measurement. The eval corpus is also a summary
+written for this repo: clean, well-structured prose that is easy to quote from,
+unlike real legal text with cross-references and enumerated subsections.
+
+**Grounded is not the same as relevant.** Verification proves a quote came from
+the corpus; it cannot prove the quote answers the question. The
+`wrong-jurisdiction` case above returned EU requirements, correctly cited, to a
+question about the UK. A scope check before answering is the missing piece.
 
 **Dense retrieval only.** No hybrid search, no BM25, no reranking. Questions
 phrased very differently from the source text will miss, and the answer will be
@@ -302,14 +346,17 @@ never uses because embeddings come from a provider.
 
 ### What I'd do next, in order
 
-1. Run `make eval-live` against Claude and GPT; publish the numbers, then tune
-   the prompt against measured citation precision rather than intuition.
-2. Hybrid retrieval (BM25 + dense) with a reranker, measured against the same
-   golden set — the fix for the honest-refusal-that-should-have-answered case.
-3. A JSON repair retry, plus provider-native structured output where available.
-4. Auth and per-key rate limiting before this is exposed to anyone.
-5. Grow the golden set to ~50 cases, including adversarial retrieved content.
-6. PDF and HTML loaders; the EU AI Act ships as a PDF.
+1. A scope check before answering — the `wrong-jurisdiction` failure is the one
+   that returns a confident, correctly-cited, wrong answer, and it is the only
+   failure mode here that a user cannot detect for themselves.
+2. Run the same suite against Claude and GPT; publish all three columns. The
+   interesting question is not which wins but whether the *failure modes* are
+   the same ones.
+3. Hybrid retrieval (BM25 + dense) with a reranker, measured against this set —
+   the likely fix for both over-refusals.
+4. A JSON repair retry, plus provider-native structured output where available.
+5. Auth and per-key rate limiting before this is exposed to anyone.
+6. Grow the golden set to ~50 cases and swap in the real legal text.
 
 ## License
 
